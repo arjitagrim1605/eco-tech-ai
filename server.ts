@@ -20,8 +20,6 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 
 const FEEDBACKS_FILE = path.join(DATA_DIR, 'feedbacks.json');
-const LOGINS_FILE = path.join(DATA_DIR, 'logins.json');
-const SHEET_CONFIG_FILE = path.join(DATA_DIR, 'sheet-config.json');
 
 // Initialize feedbacks with Pooja's authentic submission if not present
 if (!fs.existsSync(FEEDBACKS_FILE)) {
@@ -40,26 +38,6 @@ if (!fs.existsSync(FEEDBACKS_FILE)) {
     },
   ];
   fs.writeFileSync(FEEDBACKS_FILE, JSON.stringify(initialFeedbacks, null, 2), 'utf-8');
-}
-
-if (!fs.existsSync(LOGINS_FILE)) {
-  fs.writeFileSync(
-    LOGINS_FILE,
-    JSON.stringify(
-      [
-        {
-          name: 'Pooja',
-          email: 'pooja@ecotech.community',
-          phone: '+91 98765 43210',
-          college: 'Environmental Sciences, Campus Community',
-          timestamp: 'Nov 1, 2026, 10:15 AM',
-        },
-      ],
-      null,
-      2
-    ),
-    'utf-8'
-  );
 }
 
 function readJsonFile<T>(filePath: string, fallback: T): T {
@@ -513,12 +491,16 @@ Your purpose:
 // Community Feedback Routes (Persistent across all users & browsers)
 app.get('/api/feedbacks', (_req, res) => {
   const feedbacks = readJsonFile<any[]>(FEEDBACKS_FILE, []);
-  res.json({ success: true, feedbacks });
+  // Feedback is public, but submitters' email addresses are private.
+  res.json({
+    success: true,
+    feedbacks: feedbacks.map(({ email: _email, ...feedback }) => feedback),
+  });
 });
 
 app.post('/api/feedbacks', (req, res) => {
   try {
-    const { name, email, rating, category, comment } = req.body;
+    const { name, rating, category, comment } = req.body;
     if (!comment || !name) {
       return res.status(400).json({ error: 'Name and comment are required.' });
     }
@@ -527,7 +509,6 @@ app.post('/api/feedbacks', (req, res) => {
     const newFeedback = {
       id: `review-${Date.now()}`,
       name: name.trim(),
-      email: email ? email.trim() : 'member@ecotech.community',
       rating: Number(rating) || 5,
       category: category || 'Tip',
       comment: comment.trim(),
@@ -585,56 +566,22 @@ app.post('/api/feedbacks/mark-synced', (req, res) => {
   }
 });
 
-// User Registration / Login Log Routes
+// Do not persist or disclose visitors' login/contact details on this public server.
 app.get('/api/logins', (_req, res) => {
-  const logins = readJsonFile<any[]>(LOGINS_FILE, []);
-  res.json({ success: true, logins });
+  res.json({ success: true, logins: [] });
 });
 
-app.post('/api/logins', (req, res) => {
-  try {
-    const { name, email, phone, college } = req.body;
-    if (!name) return res.status(400).json({ error: 'Name is required' });
-
-    const logins = readJsonFile<any[]>(LOGINS_FILE, []);
-    const record = {
-      name: name.trim(),
-      email: email ? email.trim() : 'student@ecotech.community',
-      phone: phone ? phone.trim() : 'N/A',
-      college: college ? college.trim() : 'Eco Tech Member',
-      timestamp: new Date().toLocaleString(),
-      syncedToSheet: false,
-    };
-    logins.unshift(record);
-    writeJsonFile(LOGINS_FILE, logins);
-    res.json({ success: true, record });
-  } catch (err: any) {
-    res.status(500).json({ error: 'Could not log user.' });
-  }
+app.post('/api/logins', (_req, res) => {
+  res.json({ success: true, record: null });
 });
 
-// Master Google Sheet Configuration (Persisted globally for all app users)
+// Sheet settings stay in each user's browser; never expose a shared sheet configuration.
 app.get('/api/sheet-config', (_req, res) => {
-  const config = readJsonFile<any>(SHEET_CONFIG_FILE, {
-    spreadsheetId: '',
-    spreadsheetUrl: '',
-  });
-  res.json({ success: true, config });
+  res.json({ success: true, config: { spreadsheetId: '', spreadsheetUrl: '' } });
 });
 
-app.post('/api/sheet-config', (req, res) => {
-  try {
-    const { spreadsheetId, spreadsheetUrl } = req.body;
-    const config = {
-      spreadsheetId: spreadsheetId ? String(spreadsheetId).trim() : '',
-      spreadsheetUrl: spreadsheetUrl ? String(spreadsheetUrl).trim() : '',
-      updatedAt: new Date().toISOString(),
-    };
-    writeJsonFile(SHEET_CONFIG_FILE, config);
-    res.json({ success: true, config });
-  } catch (err: any) {
-    res.status(500).json({ error: 'Could not update sheet config.' });
-  }
+app.post('/api/sheet-config', (_req, res) => {
+  res.json({ success: true, config: { spreadsheetId: '', spreadsheetUrl: '' } });
 });
 
 // Health check endpoint
@@ -644,17 +591,6 @@ app.get('/api/health', (_req, res) => {
     service: 'Eco Tech AI API Server',
     timestamp: new Date().toISOString(),
   });
-});
-
-// Download full project ZIP endpoint
-app.get('/api/download-project', (_req, res) => {
-  const zipFile = path.resolve(__dirname, 'public', 'eco-tech-ai-project.zip');
-  if (fs.existsSync(zipFile)) {
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', 'attachment; filename="eco-tech-ai-project.zip"');
-    return fs.createReadStream(zipFile).pipe(res);
-  }
-  res.status(404).json({ error: 'Project archive not found' });
 });
 
 // Vite middleware integration for full-stack dev and static serving in prod
