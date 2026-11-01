@@ -12,3 +12,7 @@ services:
         value: production
       - key: GEMINI_API_KEY
         sync: false
+      - key: GOOGLE_SHEETS_WEBHOOK_URL
+        sync: false
+      - key: GOOGLE_SHEETS_WEBHOOK_SECRET
+        sync: false

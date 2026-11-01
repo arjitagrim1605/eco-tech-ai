@@ -20,6 +20,40 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 
 const FEEDBACKS_FILE = path.join(DATA_DIR, 'feedbacks.json');
+const SHEETS_WEBHOOK_URL = process.env.GOOGLE_SHEETS_WEBHOOK_URL || '';
+const SHEETS_WEBHOOK_SECRET = process.env.GOOGLE_SHEETS_WEBHOOK_SECRET || '';
+
+async function appendFeedbackToGoogleSheet(feedbacks: any[]): Promise<boolean> {
+  if (!SHEETS_WEBHOOK_URL || !SHEETS_WEBHOOK_SECRET) return false;
+  if (!SHEETS_WEBHOOK_URL.startsWith('https://script.google.com/macros/s/')) {
+    console.error('Google Sheets feedback sync is disabled: webhook URL is not an Apps Script web app URL.');
+    return false;
+  }
+
+  try {
+    const response = await fetch(SHEETS_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        secret: SHEETS_WEBHOOK_SECRET,
+        feedbacks: feedbacks.slice(0, 100).map((feedback) => ({
+          id: feedback.id,
+          name: feedback.name,
+          rating: feedback.rating,
+          category: feedback.category,
+          comment: feedback.comment,
+          timestamp: feedback.timestamp,
+        })),
+      }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const result = await response.json().catch(() => null);
+    return response.ok && result?.success === true;
+  } catch (error) {
+    console.warn('Google Sheets feedback sync is temporarily unavailable.');
+    return false;
+  }
+}
 
 // Initialize feedbacks with Pooja's authentic submission if not present
 if (!fs.existsSync(FEEDBACKS_FILE)) {
@@ -34,7 +68,8 @@ if (!fs.existsSync(FEEDBACKS_FILE)) {
         'Eco Tech AI is an amazing platform! The AI biodegradability scanner helped me identify plastic packaging that can be recycled, and the Waste-to-Best ideas are brilliant for campus sustainability.',
       upvotes: 6,
       timestamp: 'Nov 1, 2026',
-      syncedToSheet: false,
+      // This is display-only sample content, not a real visitor submission.
+      syncedToSheet: true,
     },
   ];
   fs.writeFileSync(FEEDBACKS_FILE, JSON.stringify(initialFeedbacks, null, 2), 'utf-8');
@@ -498,19 +533,22 @@ app.get('/api/feedbacks', (_req, res) => {
   });
 });
 
-app.post('/api/feedbacks', (req, res) => {
+app.post('/api/feedbacks', async (req, res) => {
   try {
     const { name, rating, category, comment } = req.body;
-    if (!comment || !name) {
+    if (typeof comment !== 'string' || typeof name !== 'string' || !comment.trim() || !name.trim()) {
       return res.status(400).json({ error: 'Name and comment are required.' });
+    }
+    if (name.trim().length > 80 || comment.trim().length > 2000) {
+      return res.status(400).json({ error: 'Name or feedback is too long.' });
     }
 
     const feedbacks = readJsonFile<any[]>(FEEDBACKS_FILE, []);
     const newFeedback = {
       id: `review-${Date.now()}`,
       name: name.trim(),
-      rating: Number(rating) || 5,
-      category: category || 'Tip',
+      rating: Math.max(1, Math.min(5, Math.round(Number(rating) || 5))),
+      category: typeof category === 'string' ? category.trim().slice(0, 80) : 'Tip',
       comment: comment.trim(),
       upvotes: 0,
       timestamp: new Date().toLocaleDateString('en-US', {
@@ -524,7 +562,22 @@ app.post('/api/feedbacks', (req, res) => {
     feedbacks.unshift(newFeedback);
     writeJsonFile(FEEDBACKS_FILE, feedbacks);
 
-    res.json({ success: true, feedback: newFeedback });
+    const pendingFeedbacks = readJsonFile<any[]>(FEEDBACKS_FILE, [])
+      .filter((feedback) => !feedback.syncedToSheet && feedback.id !== 'pooja-eco-review-1')
+      .slice(0, 100);
+    const syncedToSheet = await appendFeedbackToGoogleSheet(pendingFeedbacks);
+    if (syncedToSheet) {
+      const latestFeedbacks = readJsonFile<any[]>(FEEDBACKS_FILE, []);
+      const syncedIds = new Set(pendingFeedbacks.map((feedback) => feedback.id));
+      latestFeedbacks.forEach((feedback) => {
+        if (syncedIds.has(feedback.id)) feedback.syncedToSheet = true;
+      });
+      writeJsonFile(FEEDBACKS_FILE, latestFeedbacks);
+    }
+
+    const latestFeedbacks = readJsonFile<any[]>(FEEDBACKS_FILE, []);
+    const savedFeedback = latestFeedbacks.find((feedback) => feedback.id === newFeedback.id) || newFeedback;
+    res.json({ success: true, syncedToSheet: savedFeedback.syncedToSheet === true, feedback: savedFeedback });
   } catch (err: any) {
     console.error('Error adding feedback:', err);
     res.status(500).json({ error: 'Could not record feedback.' });
