@@ -12,6 +12,7 @@ export interface LoginSheetRecord {
 }
 
 export interface FeedbackSheetRecord {
+  id?: string;
   name: string;
   email: string;
   rating: number;
@@ -162,6 +163,18 @@ async function ensureSheetTabExists(
     const existingTitles: string[] = meta.sheets?.map((s: any) => s.properties?.title) || [];
 
     if (existingTitles.includes(targetTitle)) {
+      const column = String.fromCharCode(64 + headers.length);
+      await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/'${targetTitle}'!A1:${column}1?valueInputOption=USER_ENTERED`,
+        {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ values: [headers] }),
+        }
+      );
       return targetTitle;
     }
 
@@ -205,6 +218,20 @@ async function ensureSheetTabExists(
     console.warn('ensureSheetTabExists warning:', err);
     return targetTitle;
   }
+}
+
+async function getExistingFeedbackIds(
+  accessToken: string,
+  spreadsheetId: string,
+  tabName: string
+): Promise<Set<string>> {
+  const response = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'${tabName}'!G2:G`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!response.ok) throw new Error('Could not check existing feedback rows in Google Sheets');
+  const data = await response.json();
+  return new Set((data.values || []).flat().map((id: unknown) => String(id)));
 }
 
 /**
@@ -276,7 +303,12 @@ export async function appendFeedbackRecord(
     'Star Rating (1-5)',
     'Category',
     'Eco Tip / Suggestions',
+    'Submission ID',
   ]);
+
+  if (feedback.id && (await getExistingFeedbackIds(accessToken, cleanId, targetTab)).has(feedback.id)) {
+    return true;
+  }
 
   const values = [
     [
@@ -286,11 +318,12 @@ export async function appendFeedbackRecord(
       `${feedback.rating} / 5 Stars`,
       feedback.category,
       feedback.comment,
+      feedback.id || '',
     ],
   ];
 
   const response = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/'${targetTab}'!A:F:append?valueInputOption=USER_ENTERED`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/'${targetTab}'!A:G:append?valueInputOption=USER_ENTERED`,
     {
       method: 'POST',
       headers: {
@@ -328,19 +361,25 @@ export async function appendMultipleFeedbackRecords(
     'Star Rating (1-5)',
     'Category',
     'Eco Tip / Suggestions',
+    'Submission ID',
   ]);
 
-  const values = feedbacks.map((f) => [
+  const existingIds = await getExistingFeedbackIds(accessToken, cleanId, targetTab);
+  const pendingFeedbacks = feedbacks.filter((feedback) => !feedback.id || !existingIds.has(feedback.id));
+  if (!pendingFeedbacks.length) return 0;
+
+  const values = pendingFeedbacks.map((f) => [
     f.timestamp || new Date().toLocaleString(),
     f.name,
-    f.email,
+    f.email || '',
     `${f.rating} / 5 Stars`,
     f.category,
     f.comment,
+    f.id || '',
   ]);
 
   const response = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/'${targetTab}'!A:F:append?valueInputOption=USER_ENTERED`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/'${targetTab}'!A:G:append?valueInputOption=USER_ENTERED`,
     {
       method: 'POST',
       headers: {
