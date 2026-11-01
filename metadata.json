@@ -1,0 +1,9 @@
+{
+  "name": "Eco Tech AI",
+  "description": "An advanced AI-powered environmental intelligence and sustainability platform featuring biodegradable object scanning, DIY Waste-to-Best upcycling, eco chat assistant with voice, and community feedback synced to Google Sheets.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
