@@ -122,29 +122,35 @@ export const CommunityFeedback: React.FC<CommunityFeedbackProps> = ({
       }),
     };
 
-    // Save permanently on the server so everyone sees it (including Pooja's review)
-    fetch('/api/feedbacks', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newFeedback),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && data.feedback) {
-          setFeedbacks((prev) => [data.feedback, ...prev.filter((f) => f.id !== data.feedback.id)]);
-        }
-      })
-      .catch((err) => console.warn('Server feedback post warning:', err));
+    let savedOnServer = false;
+    let syncedToSheet = false;
+    try {
+      const response = await fetch('/api/feedbacks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newFeedback),
+      });
+      const data = await response.json();
+      if (response.ok && data.success && data.feedback) {
+        savedOnServer = true;
+        syncedToSheet = data.syncedToSheet === true;
+        setFeedbacks((prev) => [data.feedback, ...prev.filter((f) => f.id !== data.feedback.id)]);
+      }
+    } catch (err) {
+      console.warn('Server feedback post warning:', err);
+    }
 
     const updated = [newFeedback, ...feedbacks];
     saveFeedbacks(updated);
     setLastSubmittedFeedback(newFeedback);
 
-    // Sync to Google Sheet ONLY if current user is admin
-    if (isAdmin) {
+    // The server syncs all public feedback. The admin browser remains a fallback
+    // when the server-side Sheets connection is not configured or temporarily down.
+    if (isAdmin && !syncedToSheet) {
       try {
         const syncRes = await onRecordFeedbackToSheet(newFeedback);
         if (syncRes.success) {
+          syncedToSheet = true;
           setSyncStatus({
             type: 'success',
             message: 'Feedback submitted & appended to Google Sheet (Tab: "Community Feedback")!',
@@ -164,12 +170,20 @@ export const CommunityFeedback: React.FC<CommunityFeedbackProps> = ({
           message: 'Saved in app! Google Sheets sync will retry once re-connected.',
         });
       }
-    } else {
-      // Non-admin user (Pooja, students, public visitors)
-      // Clean eco thank you message with ZERO Google Sheets exposure
+    } else if (syncedToSheet) {
       setSyncStatus({
         type: 'success',
-        message: 'Thank you! Your eco tip and feedback have been shared with the Eco Tech AI community.',
+        message: 'Thank you! Your feedback has been shared with the community and added to the Eco Tech AI sheet.',
+      });
+    } else if (savedOnServer) {
+      setSyncStatus({
+        type: 'warning',
+        message: 'Thank you! Your feedback is saved for the community. Spreadsheet sync is pending; the admin can sync it from the admin panel.',
+      });
+    } else {
+      setSyncStatus({
+        type: 'warning',
+        message: 'Your feedback could not be saved. Please try again.',
       });
     }
 
