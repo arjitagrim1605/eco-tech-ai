@@ -53,6 +53,7 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
     isScopeError?: boolean;
   } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [isManualSyncing, setIsManualSyncing] = useState(false);
 
   if (!isOpen) return null;
 
@@ -173,8 +174,6 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
     });
     setCustomSheetInput('');
   };
-
-  const [isManualSyncing, setIsManualSyncing] = useState(false);
 
   const handleSyncAllNow = async () => {
     let token = googleAccessToken;
