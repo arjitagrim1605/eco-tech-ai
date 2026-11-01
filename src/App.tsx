@@ -52,24 +52,9 @@ export default function App() {
   const [chatInitialPrompt, setChatInitialPrompt] = useState<string | undefined>(undefined);
   const [chatContextItem, setChatContextItem] = useState<ObjectAnalysisResult | null>(null);
 
-  // Initialize Firebase Auth & global sheet config on app mount
+  // Initialize Firebase Auth. Sheet settings remain local to each user's browser.
   useEffect(() => {
-    // 1. Fetch persistent sheet config from server
-    fetch('/api/sheet-config')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && data.config?.spreadsheetId) {
-          setSpreadsheetId(data.config.spreadsheetId);
-          setSpreadsheetUrl(data.config.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${data.config.spreadsheetId}/edit`);
-          localStorage.setItem(DEFAULT_SHEET_ID_KEY, data.config.spreadsheetId);
-          if (data.config.spreadsheetUrl) {
-            localStorage.setItem(DEFAULT_SHEET_URL_KEY, data.config.spreadsheetUrl);
-          }
-        }
-      })
-      .catch((e) => console.warn('Could not fetch sheet config:', e));
-
-    // 2. Initialize Auth
+    // Initialize Auth
     initAuth(
       (user, token) => {
         setGoogleAccessToken(token);
@@ -154,18 +139,6 @@ export default function App() {
     } catch (e) {}
     setIsLoginOpen(false);
 
-    // Save login to server database
-    fetch('/api/logins', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: profile.name,
-        email: profile.email,
-        phone: profile.phone,
-        college: profile.college,
-      }),
-    }).catch((e) => console.warn('Could not post login to server:', e));
-
     const activeToken = token || googleAccessToken;
     if (activeToken) {
       setGoogleAccessToken(activeToken);
@@ -202,13 +175,6 @@ export default function App() {
     setSpreadsheetUrl(url);
     localStorage.setItem(DEFAULT_SHEET_ID_KEY, id);
     localStorage.setItem(DEFAULT_SHEET_URL_KEY, url);
-
-    // Save global config to server so all users & sessions know the master sheet
-    fetch('/api/sheet-config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ spreadsheetId: id, spreadsheetUrl: url }),
-    }).catch((e) => console.warn('Could not save sheet config to server:', e));
 
     // Immediately sync all pending reviews and logins
     if (googleAccessToken) {
