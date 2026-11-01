@@ -93,10 +93,14 @@ export default function App() {
       const fData = await fRes.json();
       let feedbackCount = 0;
 
-      if (fData.success && Array.isArray(fData.feedbacks) && fData.feedbacks.length > 0) {
-        const recordsToAppend = fData.feedbacks.map((f: any) => ({
+      const pendingFeedbacks = Array.isArray(fData.feedbacks)
+        ? fData.feedbacks.filter((f: any) => !f.syncedToSheet && f.id !== 'pooja-eco-review-1')
+        : [];
+      if (fData.success && pendingFeedbacks.length > 0) {
+        const recordsToAppend = pendingFeedbacks.map((f: any) => ({
+          id: f.id,
           name: f.name,
-          email: f.email,
+          email: f.email || '',
           rating: f.rating,
           category: f.category,
           comment: f.comment,
@@ -105,7 +109,7 @@ export default function App() {
         feedbackCount = await appendMultipleFeedbackRecords(activeToken, sheetId, recordsToAppend);
 
         // Mark synced
-        const ids = fData.feedbacks.map((f: any) => f.id);
+        const ids = pendingFeedbacks.map((f: any) => f.id);
         await fetch('/api/feedbacks/mark-synced', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -200,11 +204,17 @@ export default function App() {
 
     try {
       await appendFeedbackRecord(token, currentSheetId, {
+        id: feedback.id,
         name: feedback.name,
         email: feedback.email,
         rating: feedback.rating,
         category: feedback.category,
         comment: feedback.comment,
+      });
+      await fetch('/api/feedbacks/mark-synced', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [feedback.id] }),
       });
       return { success: true };
     } catch (err: any) {
