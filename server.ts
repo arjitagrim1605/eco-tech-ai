@@ -84,11 +84,21 @@ async function appendLoginToGoogleSheet(login: any): Promise<boolean> {
 }
 
 async function readPublicFeedbackFromGoogleSheet(): Promise<any[] | null> {
-  if (!SHEETS_WEBHOOK_URL) return null;
+  if (!SHEETS_WEBHOOK_URL) {
+    console.warn('Sheets feedback feed is unavailable: webhook URL is not configured.');
+    return null;
+  }
   try {
     const response = await fetch(SHEETS_WEBHOOK_URL, { signal: AbortSignal.timeout(5000) });
+    if (!response.ok) {
+      console.warn('Sheets feedback feed returned HTTP status', response.status);
+      return null;
+    }
     const result = await response.json().catch(() => null);
-    if (!response.ok || result?.success !== true || !Array.isArray(result.feedbacks)) return null;
+    if (result?.success !== true || !Array.isArray(result.feedbacks)) {
+      console.warn('Sheets feedback feed returned an unexpected response.');
+      return null;
+    }
     return result.feedbacks.filter((feedback: any) =>
       typeof feedback?.name === 'string' && typeof feedback?.comment === 'string'
     ).map((feedback: any) => ({
@@ -101,7 +111,8 @@ async function readPublicFeedbackFromGoogleSheet(): Promise<any[] | null> {
       upvotes: Math.max(0, Number(feedback.upvotes) || 0),
       syncedToSheet: true,
     }));
-  } catch (error) {
+  } catch (error: any) {
+    console.warn('Sheets feedback feed request failed:', error?.name || 'Unknown error');
     return null;
   }
 }
