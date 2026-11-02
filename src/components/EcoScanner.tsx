@@ -133,9 +133,11 @@ export const EcoScanner: React.FC<EcoScannerProps> = ({ onAskChatFollowUp }) => 
   const analyzeImage = async (base64?: string, itemName?: string) => {
     setIsAnalyzing(true);
     setError(null);
+    setAnalysisResult(null);
     voiceAssistant.stop();
     setIsSpeaking(false);
     setVoiceAnswerText('');
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
     try {
       let preparedImage = base64;
@@ -143,9 +145,9 @@ export const EcoScanner: React.FC<EcoScannerProps> = ({ onAskChatFollowUp }) => 
         preparedImage = await compressImage(base64, 800, 0.82);
       }
 
-      // 15 second abort controller
+      // Allow time for image analysis and a temporary retry.
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      timeoutId = setTimeout(() => controller.abort(), 45000);
 
       const response = await fetch('/api/analyze-object', {
         method: 'POST',
@@ -157,10 +159,8 @@ export const EcoScanner: React.FC<EcoScannerProps> = ({ onAskChatFollowUp }) => 
         signal: controller.signal,
       });
 
-      clearTimeout(timeoutId);
-
       const data = await response.json();
-      if (!data.success && !data.data) {
+      if (!response.ok || !data.success || !data.data) {
         throw new Error(data.error || 'Failed to analyze object.');
       }
 
@@ -181,57 +181,12 @@ export const EcoScanner: React.FC<EcoScannerProps> = ({ onAskChatFollowUp }) => 
         );
       }
     } catch (err: any) {
-      console.warn('Analysis error encountered, using resilient fallback:', err);
-      // Construct realistic fallback so the user is never stuck
-      const fallbackResult: ObjectAnalysisResult = {
-        objectName: itemName || 'Consumer Item',
-        category: itemName?.toLowerCase().includes('peel') ? 'Organic Biomass' : 'Packaging Polymer',
-        isBiodegradable: itemName?.toLowerCase().includes('peel') ? true : false,
-        biodegradabilityScore: itemName?.toLowerCase().includes('peel') ? 95 : 18,
-        decompositionTime: itemName?.toLowerCase().includes('peel') ? '2 - 4 weeks' : '400 - 450 years',
-        environmentalImpact: {
-          harmLevel: itemName?.toLowerCase().includes('peel') ? 'Low' : 'Moderate',
-          microplasticRisk: itemName?.toLowerCase().includes('peel')
-            ? 'Zero microplastics'
-            : 'Slow fragmentation into synthetic micro-debris',
-          carbonFootprint: 'Lifecycle footprint requires dry sorting',
-          oceanSoilThreat: 'Improper disposal disrupts natural habitats',
-          summary: 'Scanned item evaluated for circular sorting and waste diversion.',
-        },
-        disposalGuide: {
-          recommendedBin: itemName?.toLowerCase().includes('peel')
-            ? 'Green Compost & Organic Bin'
-            : 'Blue Recycling Bin',
-          binColor: itemName?.toLowerCase().includes('peel') ? 'green' : 'blue',
-          prepSteps: [
-            'Empty any residual contents and rinse clean',
-            'Flatten or separate caps and labels if feasible',
-            'Deposit in designated dry or organic municipal stream',
-          ],
-          recyclable: true,
-          compostable: !!itemName?.toLowerCase().includes('peel'),
-          hazardous: false,
-          specialInstructions: 'Ensure item is placed in dry stream without moisture.',
-        },
-        ecoAlternatives: ['Refillable packaging', 'Reusable containers'],
-        voiceSummary: `I analyzed your item. It has a biodegradability score of ${
-          itemName?.toLowerCase().includes('peel') ? 95 : 18
-        } percent. Please place it in your designated ${
-          itemName?.toLowerCase().includes('peel') ? 'green compost' : 'blue recycling'
-        } bin.`,
-        imageUrl: base64,
-        analyzedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
-
-      setAnalysisResult(fallbackResult);
-      if (voiceAssistant.isVoiceSupported()) {
-        voiceAssistant.speak(
-          fallbackResult.voiceSummary,
-          () => setIsSpeaking(true),
-          () => setIsSpeaking(false)
-        );
-      }
+      console.warn('Object analysis failed:', err);
+      setError(err.name === 'AbortError'
+        ? 'The image analysis took too long. Please try again with a smaller or clearer photo.'
+        : err.message || 'Could not analyze this image. Please try again with a clearer photo.');
     } finally {
+      if (timeoutId) clearTimeout(timeoutId);
       setIsAnalyzing(false);
     }
   };
@@ -577,6 +532,17 @@ export const EcoScanner: React.FC<EcoScannerProps> = ({ onAskChatFollowUp }) => 
                   <span className="text-xs text-slate-400">
                     Analyzed at {analysisResult.analyzedAt}
                   </span>
+                  {analysisResult.identificationConfidence && (
+                    <span className={`text-xs px-2 py-0.5 rounded-full border ${
+                      analysisResult.identificationConfidence === 'high'
+                        ? 'bg-emerald-950 text-emerald-300 border-emerald-700'
+                        : analysisResult.identificationConfidence === 'medium'
+                        ? 'bg-amber-950 text-amber-200 border-amber-700'
+                        : 'bg-rose-950 text-rose-200 border-rose-700'
+                    }`}>
+                      {analysisResult.identificationConfidence} confidence
+                    </span>
+                  )}
                 </div>
                 <h3 className="text-2xl sm:text-3xl font-extrabold text-white">
                   {analysisResult.objectName}
@@ -584,6 +550,11 @@ export const EcoScanner: React.FC<EcoScannerProps> = ({ onAskChatFollowUp }) => 
                 <p className="text-xs text-slate-300 mt-1 max-w-xl">
                   {analysisResult.environmentalImpact.summary}
                 </p>
+                {analysisResult.uncertaintyNotes && analysisResult.identificationConfidence !== 'high' && (
+                  <p className="text-xs text-amber-200 mt-2 max-w-xl">
+                    Uncertain: {analysisResult.uncertaintyNotes}
+                  </p>
+                )}
               </div>
             </div>
 

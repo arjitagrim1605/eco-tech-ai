@@ -125,7 +125,7 @@ export const ChatAssistant: React.FC<ChatAssistantProps> = ({
 
     try {
       // Prepare history for API
-      const historyPayload = updatedMessages.slice(-8).map((m) => ({
+      const historyPayload = updatedMessages.slice(0, -1).slice(-8).map((m) => ({
         role: m.role === 'assistant' ? 'model' : 'user',
         content: m.content,
       }));
@@ -148,7 +148,7 @@ export const ChatAssistant: React.FC<ChatAssistantProps> = ({
       });
 
       const data = await response.json();
-      if (!response.ok) {
+      if (!response.ok || !data.success || typeof data.reply !== 'string') {
         throw new Error(data.error || 'Failed to get answer from Eco Assistant.');
       }
 

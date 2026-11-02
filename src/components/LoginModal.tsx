@@ -58,14 +58,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     setIsLoading(true);
     setError(null);
     try {
-      const result = await googleSignIn();
+      const result = await googleSignIn(true, false);
       if (result) {
         const gUser = result.user;
         const profile: UserProfile = {
           name: name.trim() || gUser.displayName || 'Eco Advocate',
           email: gUser.email || email.trim() || defaultEmail,
-          phone: phone.trim() || gUser.phoneNumber || 'Not provided',
-          college: college.trim() || 'Eco Tech Student Member',
+          phone: phone.trim() || gUser.phoneNumber || '',
+          college: college.trim(),
           loginAt: new Date().toISOString(),
           isGoogleLinked: true,
           googlePhotoUrl: gUser.photoURL || undefined,
@@ -108,6 +108,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           <p className="text-sm text-slate-300">
             Welcome! Please enter your user details to access the AI Eco Channel, Upcycle Engine, and Voice Assistant.
           </p>
+          <p className="mt-3 text-xs leading-relaxed text-emerald-100/80">
+            When you sign in, your name, email, contact number, class or college, and login time are added to the Eco Tech AI Google Sheet. Passwords are never collected or stored.
+          </p>
         </div>
 
         <div className="p-6 space-y-6">
@@ -121,7 +124,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           <div className="bg-slate-800/60 border border-slate-700/80 rounded-xl p-4 text-center">
             <p className="text-xs text-slate-300 mb-3 flex items-center justify-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-              Sign in with Google to automatically connect & sync with Google Sheets
+              Sign in with Google. Your profile details are recorded in the Eco Tech AI sheet.
             </p>
             <button
               type="button"
