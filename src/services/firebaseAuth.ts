@@ -13,10 +13,12 @@ const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 
 // Create Google provider with exact Sheets scope and explicit consent prompt
-export const createGoogleProvider = (forceConsent = true) => {
+export const createGoogleProvider = (forceConsent = true, includeSheetsScope = true) => {
   const provider = new GoogleAuthProvider();
-  // Request Google Sheets scope
-  provider.addScope('https://www.googleapis.com/auth/spreadsheets');
+  if (includeSheetsScope) {
+    // Only the spreadsheet owner needs this scope; ordinary users only sign in.
+    provider.addScope('https://www.googleapis.com/auth/spreadsheets');
+  }
   if (forceConsent) {
     provider.setCustomParameters({
       prompt: 'consent select_account',
@@ -51,11 +53,12 @@ export const initAuth = (
 
 // Sign in with Google (Popup) with forced consent parameter to ensure scope acquisition
 export const googleSignIn = async (
-  forceConsent = true
+  forceConsent = true,
+  includeSheetsScope = true,
 ): Promise<{ user: User; accessToken: string } | null> => {
   try {
     isSigningIn = true;
-    const provider = createGoogleProvider(forceConsent);
+    const provider = createGoogleProvider(forceConsent, includeSheetsScope);
     const result = await signInWithPopup(auth, provider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
