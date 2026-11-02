@@ -2,6 +2,7 @@ import express from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI } from '@google/genai';
 
@@ -52,6 +53,56 @@ async function appendFeedbackToGoogleSheet(feedbacks: any[]): Promise<boolean> {
   } catch (error) {
     console.warn('Google Sheets feedback sync is temporarily unavailable.');
     return false;
+  }
+}
+
+async function appendLoginToGoogleSheet(login: any): Promise<boolean> {
+  if (!SHEETS_WEBHOOK_URL || !SHEETS_WEBHOOK_SECRET) return false;
+  try {
+    const response = await fetch(SHEETS_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        secret: SHEETS_WEBHOOK_SECRET,
+        logins: [{
+          id: login.id,
+          name: login.name,
+          email: login.email,
+          phone: login.phone,
+          college: login.college,
+          timestamp: login.timestamp,
+        }],
+      }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const result = await response.json().catch(() => null);
+    return response.ok && result?.success === true;
+  } catch (error) {
+    console.warn('Google Sheets login sync is temporarily unavailable.');
+    return false;
+  }
+}
+
+async function readPublicFeedbackFromGoogleSheet(): Promise<any[] | null> {
+  if (!SHEETS_WEBHOOK_URL) return null;
+  try {
+    const response = await fetch(SHEETS_WEBHOOK_URL, { signal: AbortSignal.timeout(5000) });
+    const result = await response.json().catch(() => null);
+    if (!response.ok || result?.success !== true || !Array.isArray(result.feedbacks)) return null;
+    return result.feedbacks.filter((feedback: any) =>
+      typeof feedback?.name === 'string' && typeof feedback?.comment === 'string'
+    ).map((feedback: any) => ({
+      id: String(feedback.id || ''),
+      name: feedback.name,
+      rating: Math.max(1, Math.min(5, Math.round(Number(feedback.rating) || 5))),
+      category: String(feedback.category || 'Tip'),
+      comment: feedback.comment,
+      timestamp: String(feedback.timestamp || ''),
+      upvotes: Math.max(0, Number(feedback.upvotes) || 0),
+      syncedToSheet: true,
+    }));
+  } catch (error) {
+    return null;
   }
 }
 
@@ -307,12 +358,14 @@ app.post('/api/analyze-object', async (req, res) => {
 
     const promptText = `
 You are Eco Tech AI, a world-class environmental scientist and waste management expert.
-Analyze the provided object image or item named "${itemName || 'item in image'}".
-Evaluate its environmental footprint, materials, biodegradability, ecological harm, and proper disposal.
+Analyze the supplied object image${itemName ? ` and use this optional user label as a hint, not as proof: "${itemName}"` : ''}.
+Use the image as the primary evidence. Identify only details that are actually visible. If the object, material, or exact resin cannot be distinguished, say so plainly and lower the identification confidence; never guess a material, recycling number, decomposition time, or environmental figure. Distinguish general guidance from local rules, since recycling rules vary by location. Do not invent precise carbon or decomposition numbers when reliable evidence is not available.
 
 Return ONLY a valid JSON response matching this schema:
 {
   "objectName": "Recognized name of the item",
+  "identificationConfidence": "high" | "medium" | "low",
+  "uncertaintyNotes": "What cannot be determined from this image, or 'No major visual uncertainty'",
   "category": "Material category (e.g. Plastic PET #1, Organic, Glass, Electronic Waste, Cardboard)",
   "isBiodegradable": true or false,
   "biodegradabilityScore": number from 0 to 100,
@@ -361,19 +414,17 @@ Return ONLY a valid JSON response matching this schema:
       try {
         parsedData = JSON.parse(cleanJson);
       } catch (jsonErr) {
-        console.warn('JSON parse error, falling back:', jsonErr);
-        parsedData = getObjectAnalysisFallback(itemName);
+        console.warn('Object analysis returned invalid JSON:', jsonErr);
+        return res.status(502).json({ success: false, error: 'The image analysis returned an unreadable result. Please try again with a clearer photo.' });
       }
       return res.json({ success: true, data: parsedData });
     } catch (genAiError: any) {
-      console.warn('Gemini generateContent transient error, using scientific fallback:', genAiError?.message);
-      const fallback = getObjectAnalysisFallback(itemName);
-      return res.json({ success: true, data: fallback });
+      console.error('Gemini object analysis failed:', genAiError?.message);
+      return res.status(503).json({ success: false, error: 'AI image analysis is temporarily unavailable. Please try again shortly; no result was guessed.' });
     }
   } catch (error: any) {
     console.error('Error in analyze-object:', error);
-    const fallback = getObjectAnalysisFallback(req.body.itemName);
-    return res.json({ success: true, data: fallback });
+    return res.status(500).json({ success: false, error: 'Image analysis failed. Please try again with another photo.' });
   }
 });
 
@@ -475,6 +526,7 @@ app.post('/api/chat', async (req, res) => {
 
     const systemInstruction = `
 You are the Eco Tech AI Chat Assistant. You are a passionate, highly knowledgeable, and friendly sustainability advisor, zero-waste advocate, and environmental engineer.
+Accuracy rules: prioritize correctness over sounding certain; never invent facts, sources, local recycling rules, exact decomposition times, or statistics. If the answer depends on location, ask for the user's city/country or explain that local rules differ. If evidence is insufficient or you are unsure, say what is unknown and give a safe way to verify it. Separate established facts from estimates and suggestions. Use the user's latest question once, and use earlier messages only as context.
 Your purpose:
 - Help users understand recycling rules, composting, biodegradability, upcycling, carbon footprint reduction, circular economies, and eco-friendly daily habits.
 - Provide actionable, precise, and practical tips tailored for students, households, and institutions.
@@ -509,11 +561,8 @@ Your purpose:
       const reply = response.text || 'I am ready to help with any questions on sustainability and recycling!';
       return res.json({ success: true, reply });
     } catch (genAiError: any) {
-      console.warn('Gemini chat transient error, formulating fallback response:', genAiError?.message);
-      return res.json({
-        success: true,
-        reply: `Here is helpful guidance on "${message}": \n\n• **Material Segregation**: Clean and separate organic from non-organic recyclables.\n• **Zero Waste Tip**: Prioritize reuse and upcycling before sending materials for municipal recycling.\n• **Local Action**: Check your campus or city collection guidelines for specific bin schedules.`,
-      });
+      console.warn('Gemini chat is unavailable:', genAiError?.message);
+      return res.status(503).json({ success: false, error: 'The assistant is temporarily unavailable, so it cannot give a reliable answer right now. Please try again shortly.' });
     }
   } catch (error: any) {
     console.error('Error in eco chat:', error);
@@ -524,12 +573,24 @@ Your purpose:
 });
 
 // Community Feedback Routes (Persistent across all users & browsers)
-app.get('/api/feedbacks', (_req, res) => {
-  const feedbacks = readJsonFile<any[]>(FEEDBACKS_FILE, []);
-  // Feedback is public, but submitters' email addresses are private.
+app.get('/api/feedbacks', async (_req, res) => {
+  const localFeedbacks = readJsonFile<any[]>(FEEDBACKS_FILE, []);
+  const sheetFeedbacks = await readPublicFeedbackFromGoogleSheet();
+  const merged = new Map<string, any>();
+  const addFeedback = (feedback: any) => {
+    const key = [feedback.name, feedback.timestamp, feedback.comment]
+      .map((value) => String(value || '').trim().toLocaleLowerCase())
+      .join('\u001f');
+    if (key !== '\u001f\u001f') merged.set(key, feedback);
+  };
+
+  localFeedbacks.forEach(addFeedback);
+  (sheetFeedbacks || []).forEach(addFeedback);
+
+  // Feedback is public, but submitters' email addresses are never returned.
   res.json({
     success: true,
-    feedbacks: feedbacks.map(({ email: _email, ...feedback }) => feedback),
+    feedbacks: Array.from(merged.values()).map(({ email: _email, ...feedback }) => feedback),
   });
 });
 
@@ -619,13 +680,30 @@ app.post('/api/feedbacks/mark-synced', (req, res) => {
   }
 });
 
-// Do not persist or disclose visitors' login/contact details on this public server.
-app.get('/api/logins', (_req, res) => {
-  res.json({ success: true, logins: [] });
-});
+// Forward only the user-approved profile fields to the private Google Sheet.
+// Login data is not written to local disk or returned by a public read endpoint.
+app.post('/api/logins', async (req, res) => {
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
+  const phone = typeof req.body?.phone === 'string' ? req.body.phone.trim() : '';
+  const college = typeof req.body?.college === 'string' ? req.body.college.trim() : '';
 
-app.post('/api/logins', (_req, res) => {
-  res.json({ success: true, record: null });
+  if (!name || !email || !email.includes('@') || name.length > 120 || email.length > 254 || phone.length > 80 || college.length > 160) {
+    return res.status(400).json({ success: false, error: 'Please provide valid login details.' });
+  }
+
+  const synced = await appendLoginToGoogleSheet({
+    id: randomUUID(),
+    name,
+    email,
+    phone,
+    college,
+    timestamp: new Date().toISOString(),
+  });
+  if (!synced) {
+    return res.status(503).json({ success: false, error: 'Google Sheets login sync is unavailable.' });
+  }
+  return res.json({ success: true });
 });
 
 // Sheet settings stay in each user's browser; never expose a shared sheet configuration.
