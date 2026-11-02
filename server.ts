@@ -99,6 +99,7 @@ async function readPublicFeedbackFromGoogleSheet(): Promise<any[] | null> {
       console.warn('Sheets feedback feed returned an unexpected response.');
       return null;
     }
+    console.info('Sheets feedback feed returned', result.feedbacks.length, 'records.');
     return result.feedbacks.filter((feedback: any) =>
       typeof feedback?.name === 'string' && typeof feedback?.comment === 'string'
     ).map((feedback: any) => ({
@@ -597,6 +598,7 @@ app.get('/api/feedbacks', async (_req, res) => {
 
   localFeedbacks.forEach(addFeedback);
   (sheetFeedbacks || []).forEach(addFeedback);
+  console.info('Feedback feed totals:', { local: localFeedbacks.length, sheet: sheetFeedbacks?.length || 0, merged: merged.size });
 
   // Feedback is public, but submitters' email addresses are never returned.
   res.json({
