@@ -16,10 +16,8 @@ import {
 import {
   DEFAULT_SHEET_ID_KEY,
   DEFAULT_SHEET_URL_KEY,
-  appendLoginRecord,
   appendFeedbackRecord,
   appendMultipleFeedbackRecords,
-  appendMultipleLoginRecords,
 } from './services/googleSheets';
 import { Leaf, ShieldCheck, Heart, Sparkles, ExternalLink, RefreshCw, CheckCircle2 } from 'lucide-react';
 
@@ -39,6 +37,7 @@ export default function App() {
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
   const [isSyncingAll, setIsSyncingAll] = useState<boolean>(false);
   const [adminSyncStatus, setAdminSyncStatus] = useState<string | null>(null);
+  const [loginSyncStatus, setLoginSyncStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const [spreadsheetId, setSpreadsheetId] = useState<string | null>(() => {
     return localStorage.getItem(DEFAULT_SHEET_ID_KEY) || null;
@@ -56,13 +55,9 @@ export default function App() {
   useEffect(() => {
     // Initialize Auth
     initAuth(
-      (user, token) => {
+      (_user, token) => {
         setGoogleAccessToken(token);
         setCachedAccessToken(token);
-        // If admin with active spreadsheet, trigger background auto-sync
-        if (token && user?.email?.toLowerCase() === 'arjitagrim1605@gmail.com') {
-          syncAllPendingDataToSheet(token, spreadsheetId || localStorage.getItem(DEFAULT_SHEET_ID_KEY) || '');
-        }
       },
       () => {
         setGoogleAccessToken(null);
@@ -117,13 +112,6 @@ export default function App() {
         });
       }
 
-      // 2. Fetch logins from server
-      const lRes = await fetch('/api/logins');
-      const lData = await lRes.json();
-      if (lData.success && Array.isArray(lData.logins) && lData.logins.length > 0) {
-        await appendMultipleLoginRecords(activeToken, sheetId, lData.logins);
-      }
-
       setAdminSyncStatus(`Synced ${feedbackCount} community reviews to Google Sheets tab 'Community Feedback'!`);
       setTimeout(() => setAdminSyncStatus(null), 5000);
       return { success: true };
@@ -143,24 +131,31 @@ export default function App() {
     } catch (e) {}
     setIsLoginOpen(false);
 
+    setLoginSyncStatus(null);
     const activeToken = token || googleAccessToken;
     if (activeToken) {
       setGoogleAccessToken(activeToken);
       setCachedAccessToken(activeToken);
+    }
 
-      // If a spreadsheet is already linked, append login record
-      if (spreadsheetId) {
-        try {
-          await appendLoginRecord(activeToken, spreadsheetId, {
-            name: profile.name,
-            email: profile.email,
-            phone: profile.phone,
-            college: profile.college,
-          });
-        } catch (err) {
-          console.warn('Could not auto-append login to sheet:', err);
-        }
-      }
+    try {
+      const response = await fetch('/api/logins', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: profile.name,
+          email: profile.email,
+          phone: profile.phone,
+          college: profile.college,
+        }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || result?.success !== true) throw new Error('Login details could not be added to the sheet.');
+      setLoginSyncStatus({ type: 'success', message: 'Your name, email, contact, class, and login time were added to the Eco Tech AI sheet.' });
+      setTimeout(() => setLoginSyncStatus(null), 7000);
+    } catch (error) {
+      console.warn('Could not sync login details to Google Sheets.');
+      setLoginSyncStatus({ type: 'error', message: 'Your profile is saved for this browser, but the Google Sheet could not be reached. Please contact the site owner.' });
     }
   };
 
@@ -247,6 +242,17 @@ export default function App() {
         isSheetSynced={!!spreadsheetId}
         spreadsheetId={spreadsheetId}
       />
+
+      {loginSyncStatus && (
+        <div
+          role="status"
+          className={`mx-auto mt-4 max-w-7xl w-full px-4 sm:px-6 lg:px-8 text-xs ${
+            loginSyncStatus.type === 'success' ? 'text-emerald-300' : 'text-amber-300'
+          }`}
+        >
+          {loginSyncStatus.message}
+        </div>
+      )}
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">

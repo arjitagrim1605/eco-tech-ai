@@ -28,6 +28,8 @@ export interface DisposalGuide {
 
 export interface ObjectAnalysisResult {
   objectName: string;
+  identificationConfidence?: 'high' | 'medium' | 'low';
+  uncertaintyNotes?: string;
   category: string;
   isBiodegradable: boolean;
   biodegradabilityScore: number; // 0 to 100
