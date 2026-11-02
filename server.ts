@@ -178,8 +178,7 @@ async function generateWithRetry(params: any, retries = 2, delayMs = 1000): Prom
       const isTransient =
         err?.status === 503 ||
         err?.message?.includes('503') ||
-        err?.message?.includes('high demand') ||
-        err?.status === 429;
+        err?.message?.includes('high demand');
       if (attempt < retries && isTransient) {
         await new Promise((r) => setTimeout(r, delayMs * (attempt + 1)));
       } else {
@@ -413,7 +412,7 @@ Return ONLY a valid JSON response matching this schema:
 
     try {
       const response = await generateWithRetry({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-3.6-flash',
         contents: { parts },
         config: {
           responseMimeType: 'application/json',
@@ -505,7 +504,7 @@ Return ONLY a valid JSON response matching this schema:
 
     try {
       const response = await generateWithRetry({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-3.6-flash',
         contents: { parts },
         config: {
           responseMimeType: 'application/json',
@@ -563,7 +562,7 @@ Your purpose:
 
     try {
       const response = await generateWithRetry({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-3.6-flash',
         contents,
         config: {
           systemInstruction,
